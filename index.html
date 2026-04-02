@@ -157,7 +157,7 @@ const fP=n=>(n*100).toFixed(1)+'%';
 const AC=['#A60F3D','#0E3B2E','#D4365F','#1A5C48','#FFB800','#00D971','#E8597A','#3D9B7A','#FF4757','#A0A8BC','#00D4AA','#4A90D9'];
 const TIP={backgroundColor:'#1A1F2C',titleColor:'#E8ECF4',bodyColor:'#E8597A',borderColor:'rgba(166,15,61,.2)',borderWidth:1,cornerRadius:10,padding:12};
 const TK='#2A3444',GL='rgba(30,40,54,.5)';
-let ch={},D={},MK=[],cur='',metas={b:7500,s:10000,g:15000,d:25000},contaInfo={},dataYear=2026;
+let ch={},D={},MK=[],cur='',metas={b:7500,s:10000,g:15000,d:25000},contaInfo={},dataYear=2026,rawRows=[];
 function dotCls(s){if(!s)return['dot-g','Ativo'];const l=s.toLowerCase();if(l.includes('restricao'))return['dot-y','Restricao'];if(l==='fechada')return['dot-r','Fechada'];if(l==='growth')return['dot-a','Growth'];if(l.includes('stand'))return['dot-x','Stand-By'];if(l==='live')return['dot-c','Live'];return['dot-g','Ativo']}
 function tagHtml(t){if(!t)return'';const l=t.toLowerCase();if(l==='shop')return'<span class="tag tag-shop">Shop</span>';if(l==='pilot')return'<span class="tag tag-pilot">Pilot</span>';return'<span class="tag tag-farm">'+t+'</span>'}
 
@@ -178,7 +178,7 @@ cfg.forEach(c=>{const v=parseBR(c.valor);if(c.chave==='meta_bronze')metas.b=v;if
   if(c.chave==='meta_comissao')metas.mc=v;if(c.chave==='meta_gmv')metas.mg=v;if(c.chave==='meta_comissao_brl')metas.mcb=v;if(c.chave==='meta_gmv_brl')metas.mgb=v});
 contaInfo={};cont.forEach(c=>{if(c.conta)contaInfo[c.conta]={status:c.status||'Ativo',pais:c.pais||'US',tipo:(c.tipo||'Shop').trim()}});
 $('nc').textContent=cont.filter(c=>c.conta).length;
-D={};
+D={};rawRows=[];
 // Detect year from first data row
 if(rev.length>0){const fd=parseDate(rev[0].data);if(fd)dataYear=fd.year}
 rev.forEach(r=>{
@@ -190,6 +190,8 @@ rev.forEach(r=>{
   const cotacao=parseBR(r.cotacao)||parseBR(r.cotacao_brl)||1;
   const comBRL=parseBR(r.comissao_brl)||(com*cotacao);
   const dt=parseDate(r.data);
+  // Store raw for 30d view
+  if(dt)rawRows.push({dt,conta,gmv,com,itens,cotacao,comBRL,produto:r.produto||'',pais:info.pais||'US',tipo:info.tipo,status:info.status});
   if(!D[short])D[short]={a:new Set(),s:{},m:{...metas},days:{},prods:{},byCountry:{},byType:{},totGMV:0,totCom:0,totItens:0,totComBRL:0,cotacoes:{},month:dt?dt.month:1,year:dt?dt.year:dataYear};
   const md=D[short];md.a.add(conta);md.s[conta]=info.status;
   md.totGMV+=gmv;md.totCom+=com;md.totItens+=itens;md.totComBRL+=comBRL;
@@ -211,6 +213,8 @@ Object.keys(D).forEach(k=>{const md=D[k];md.a=Array.from(md.a).sort();
   md.d=[];
   for(let i=1;i<=numDays;i++){const dk=String(i).padStart(2,'0');const dd=md.days[dk]||{};const comVals=md.a.map(a=>dd[a]?.com||0);const gmvVals=md.a.map(a=>dd[a]?.gmv||0);
   md.d.push({l:dk,v:comVals,g:gmvVals,tc:Math.round(comVals.reduce((s,v)=>s+v,0)*100)/100,tg:Math.round(gmvVals.reduce((s,v)=>s+v,0)*100)/100})}delete md.days});
+// Build 30-day rolling view
+build30d();
 MK=Object.keys(D);if(MK.length)cur=MK[MK.length-1];
 $('ldState').style.display='none';$('dc').style.display='block';
 $('upd').textContent='Atualizado '+new Date().toLocaleTimeString('pt-BR');
@@ -218,7 +222,49 @@ const ft=$('footTxt');if(ft)ft.innerHTML='Digital Ace &mdash; TikTok Shop Dashbo
 rT();rA();
 }catch(err){console.error(err);$('ldState').innerHTML='<div style="text-align:center"><p style="color:var(--red);margin-bottom:8px">Erro ao carregar Google Sheets</p><p style="font-size:12px;color:var(--n500)">Verifique SHEET_ID e compartilhamento da planilha</p></div>'}}
 
-function rT(){$('mT').innerHTML=MK.map(k=>`<button class="tab ${k===cur?'act':''}" onclick="sw('${k}')">${k}</button>`).join('')}
+function build30d(){
+  const today=new Date();const cutoff=new Date(today);cutoff.setDate(cutoff.getDate()-30);
+  const filtered=rawRows.filter(r=>{const d=new Date(r.dt.year,r.dt.month-1,r.dt.day);return d>=cutoff&&d<=today});
+  if(!filtered.length)return;
+  // Build a virtual month dataset keyed '30d'
+  const md={a:new Set(),s:{},m:{...metas},prods:{},byCountry:{},byType:{},totGMV:0,totCom:0,totItens:0,totComBRL:0,cotacoes:{},month:today.getMonth()+1,year:today.getFullYear(),numDays:30,maxDataDay:30,is30d:true};
+  const dayBuckets={};
+  filtered.forEach(r=>{
+    md.a.add(r.conta);md.s[r.conta]=r.status;
+    md.totGMV+=r.gmv;md.totCom+=r.com;md.totItens+=r.itens;md.totComBRL+=r.comBRL;
+    md.byCountry[r.pais]=(md.byCountry[r.pais]||0)+r.com;
+    md.cotacoes[r.pais]=r.cotacao;
+    md.byType[r.tipo]=(md.byType[r.tipo]||0)+r.com;
+    if(r.produto)md.prods[r.produto]=(md.prods[r.produto]||0)+r.com;
+    // Label = DD/MM
+    const lbl=String(r.dt.day).padStart(2,'0')+'/'+String(r.dt.month).padStart(2,'0');
+    const dateKey=r.dt.year*10000+r.dt.month*100+r.dt.day;
+    if(!dayBuckets[dateKey])dayBuckets[dateKey]={lbl,accounts:{}};
+    if(!dayBuckets[dateKey].accounts[r.conta])dayBuckets[dateKey].accounts[r.conta]={com:0,gmv:0,itens:0};
+    dayBuckets[dateKey].accounts[r.conta].com+=r.com;
+    dayBuckets[dateKey].accounts[r.conta].gmv+=r.gmv;
+    dayBuckets[dateKey].accounts[r.conta].itens+=r.itens;
+  });
+  md.a=Array.from(md.a).sort();
+  // Sort by dateKey and build d array
+  const sortedKeys=Object.keys(dayBuckets).map(Number).sort((a,b)=>a-b);
+  md.d=sortedKeys.map(dk=>{
+    const b=dayBuckets[dk];
+    const comVals=md.a.map(a=>b.accounts[a]?.com||0);
+    const gmvVals=md.a.map(a=>b.accounts[a]?.gmv||0);
+    return{l:b.lbl,v:comVals,g:gmvVals,tc:Math.round(comVals.reduce((s,v)=>s+v,0)*100)/100,tg:Math.round(gmvVals.reduce((s,v)=>s+v,0)*100)/100};
+  });
+  md.maxDataDay=md.d.length;
+  D['30d']=md;
+}
+
+function rT(){
+  // Put 30d first, then month tabs
+  const monthKeys=MK.filter(k=>k!=='30d');
+  let html='<button class="tab '+(cur==='30d'?'act':'')+'" onclick="sw(\'30d\')">30 dias</button>';
+  html+=monthKeys.map(k=>`<button class="tab ${k===cur?'act':''}" onclick="sw('${k}')">${k}</button>`).join('');
+  $('mT').innerHTML=html;
+}
 function sw(k){cur=k;rT();rA()}
 
 function rA(){
@@ -229,8 +275,8 @@ const dA=d.d.filter(r=>r.tc>0).length,avg=dA>0?tCom/dA:0;
 const actA=d.a.filter(a=>{const x=(d.s[a]||'').toLowerCase();return x!=='fechada'&&!x.includes('stand')}).length;
 const mi=MK.indexOf(cur);let pCom=0;if(mi>0)pCom=D[MK[mi-1]].totCom;const pc=pCom>0?((tCom-pCom)/pCom*100):tCom>0?100:0;
 
-$('ss').textContent=`${cur} ${dataYear} • ${actA} contas ativas • ${tItens} itens vendidos`;
-$('plbl').textContent=cur+' '+dataYear;
+$('ss').textContent=cur==='30d'?`Ultimos 30 dias • ${actA} contas ativas • ${tItens} itens vendidos`:`${cur} ${dataYear} • ${actA} contas ativas • ${tItens} itens vendidos`;
+$('plbl').textContent=cur==='30d'?'Ultimos 30 dias':cur+' '+dataYear;
 $('tvl').textContent=fU(tCom);
 $('tvs').innerHTML=`<span style="color:${pc>=0?'var(--green)':'var(--red)'};font-weight:600">${pc>=0?'&#9650;':'&#9660;'} ${Math.abs(pc).toFixed(1)}%</span> vs mes anterior`;
 
