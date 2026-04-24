@@ -213,9 +213,25 @@ function normMes(m){
   if(!m)return'';
   return m.replace(/\./g,'').trim().toLowerCase();
 }
+// Parse number: handles "5,5" (BR) and "5.5" (US) and "R$ 30,16"
+function pNum(v){
+  if(!v||v==='')return 0;
+  v=String(v).replace(/[R$\s]/g,'');
+  // If has both . and , → assume . is thousands, , is decimal (BR: 1.234,56)
+  if(v.includes('.')&&v.includes(',')){v=v.replace(/\./g,'').replace(',','.');}
+  // If only , → it's decimal separator
+  else if(v.includes(',')){v=v.replace(',','.');}
+  return parseFloat(v)||0;
+}
 // Get flexible column value - tries multiple possible names
 function getCol(row,names){
   for(const n of names){if(row[n]!==undefined&&row[n]!=='')return row[n];}
+  // Also try partial match for truncated column names
+  const keys=Object.keys(row);
+  for(const n of names){
+    const found=keys.find(k=>k.startsWith(n.slice(0,4))||n.startsWith(k.slice(0,4)));
+    if(found&&row[found]!=='')return row[found];
+  }
   return'';
 }
 
@@ -256,6 +272,8 @@ allRevenue=rawRev.map(r=>{
   return{data,mes,conta,produto,itens,gmv,comissao,cotacao,comissao_brl:comBrl,pct_comissao:pctCom};
 });
 console.log('Revenue rows loaded:',allRevenue.length,'Sample:',allRevenue[0]);
+console.log('CSV headers found:',Object.keys(rawRev[0]||{}));
+console.log('Contas loaded:',Object.keys(contaInfo).join(', '));
 const cont=parseCSV(contCSV),cfg=parseCSV(cfgCSV);
 cfg.forEach(c=>{const v=parseFloat(c.valor);if(c.chave==='meta_bronze')metas.b=v;if(c.chave==='meta_silver')metas.s=v;if(c.chave==='meta_gold')metas.g=v;if(c.chave==='meta_diamond')metas.d=v});
 contaInfo={};cont.forEach(c=>{const nome=getCol(c,['conta','account']);if(nome)contaInfo[nome]={status:getCol(c,['status'])||'Ativo',pais:getCol(c,['pais','country'])||'US',tipo:(getCol(c,['tipo','type'])||'Shop').trim()}});
@@ -272,8 +290,9 @@ function filterRevenue(){
   const today=new Date();const todayStr=today.toISOString().slice(0,10);
   return allRevenue.filter(r=>{
     if(!r.data||!r.conta)return false;
-    const info=contaInfo[r.conta]||{tipo:'Shop'};
-    if(info.tipo.toLowerCase()==='farm')return false;
+    const info=contaInfo[r.conta];
+    // Only exclude if explicitly marked as Farm in contas sheet
+    if(info&&info.tipo.toLowerCase()==='farm')return false;
     if(filterMode==='30d'){
       const d=new Date(r.data);const diff=(today-d)/(1000*60*60*24);return diff<=30&&diff>=0;
     }
@@ -304,9 +323,9 @@ console.log('Filtered rows:',rev.length);
 const d={a:new Set(),s:{},m:{...metas},days:{},prods:{},byCountry:{},byType:{},totGMV:0,totCom:0,totItens:0,totComBRL:0,cotacoes:{}};
 rev.forEach(r=>{
   const conta=r.conta,info=contaInfo[conta]||{status:'Ativo',pais:'US',tipo:'Shop'};
-  const gmv=parseFloat(r.gmv)||0,com=parseFloat(r.comissao)||0,itens=parseInt(r.itens)||0;
-  const cotacao=parseFloat(r.cotacao)||1;
-  const comBRL=parseFloat(r.comissao_brl)||(com*cotacao);
+  const gmv=pNum(r.gmv),com=pNum(r.comissao),itens=parseInt(r.itens)||0;
+  const cotacao=pNum(r.cotacao)||1;
+  const comBRL=pNum(r.comissao_brl)||(com*cotacao);
   d.a.add(conta);d.s[conta]=info.status;
   d.totGMV+=gmv;d.totCom+=com;d.totItens+=itens;d.totComBRL+=comBRL;
   const pais=info.pais||'US';d.byCountry[pais]=(d.byCountry[pais]||0)+com;d.cotacoes[pais]=cotacao;
