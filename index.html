@@ -259,21 +259,36 @@ const [revCSV,contCSV,cfgCSV]=await Promise.all([fetch(sheetURL('revenue')).then
 const rawRev=parseCSV(revCSV);
 // Normalize all revenue rows
 allRevenue=rawRev.map(r=>{
-  const data=normDate(getCol(r,['data','date']));
-  const mes=normMes(getCol(r,['mes','month']));
-  const conta=getCol(r,['conta','account','conta ']);
-  const produto=getCol(r,['produto','product']);
-  const itens=getCol(r,['itens','items','qtd','quantidade']);
-  const gmv=getCol(r,['gmv','gross','valor_total']);
-  const comissao=getCol(r,['comissao','commission','comissão']);
-  const cotacao=getCol(r,['cotacao','cotação','rate','cotacac','cotacao_brl']);
-  const comBrl=getCol(r,['comissao_brl','omissao_b','comissao_brl','com_brl']);
-  const pctCom=getCol(r,['pct_comissao','ct_comissa','pct_com','%_comissao']);
+  // Get all keys to understand the structure
+  const keys=Object.keys(r);
+  const data=normDate(r[keys[0]]||'');
+  const mes=normMes(r[keys[1]]||'');
+  const conta=(r[keys[2]]||'').trim();
+  const produto=(r[keys[3]]||'').trim();
+  
+  // Handle both old format (6 cols: data,mes,conta,produto,usd,cotacao)
+  // and new format (10 cols: data,mes,conta,produto,itens,gmv,comissao,cotacao,comissao_brl,pct_comissao)
+  let itens='',gmv='',comissao='',cotacao='',comBrl='',pctCom='';
+  
+  if(keys.length<=6){
+    // Old format: col4=usd (this is the commission), col5=cotacao
+    comissao=r[keys[4]]||'';
+    cotacao=r[keys[5]]||'';
+  } else {
+    // New format with itens,gmv,comissao,cotacao,...
+    itens=r[keys[4]]||'';
+    gmv=r[keys[5]]||'';
+    comissao=r[keys[6]]||'';
+    cotacao=r[keys[7]]||'';
+    comBrl=r[keys[8]]||'';
+    pctCom=r[keys[9]]||'';
+  }
+  
   return{data,mes,conta,produto,itens,gmv,comissao,cotacao,comissao_brl:comBrl,pct_comissao:pctCom};
 });
-console.log('Revenue rows loaded:',allRevenue.length,'Sample:',allRevenue[0]);
-console.log('CSV headers found:',Object.keys(rawRev[0]||{}));
-console.log('Contas loaded:',Object.keys(contaInfo).join(', '));
+console.log('Revenue rows:',allRevenue.length,'Headers:',Object.keys(rawRev[0]||{}));
+console.log('Sample row:',JSON.stringify(allRevenue[0]));
+console.log('Last row:',JSON.stringify(allRevenue[allRevenue.length-1]));
 const cont=parseCSV(contCSV),cfg=parseCSV(cfgCSV);
 cfg.forEach(c=>{const v=parseFloat(c.valor);if(c.chave==='meta_bronze')metas.b=v;if(c.chave==='meta_silver')metas.s=v;if(c.chave==='meta_gold')metas.g=v;if(c.chave==='meta_diamond')metas.d=v});
 contaInfo={};cont.forEach(c=>{const nome=getCol(c,['conta','account']);if(nome)contaInfo[nome]={status:getCol(c,['status'])||'Ativo',pais:getCol(c,['pais','country'])||'US',tipo:(getCol(c,['tipo','type'])||'Shop').trim()}});
@@ -307,14 +322,14 @@ function filterRevenue(){
 }
 
 function rTabs(){
-  const tabs=[{label:'30 dias',mode:'30d'}];
-  availableMonths.forEach(m=>tabs.push({label:m,mode:'month',month:m}));
-  $('mT').innerHTML=tabs.map(t=>{
-    const isAct=(t.mode==='30d'&&filterMode==='30d')||(t.mode==='month'&&filterMode==='month'&&t.month===filterMonth);
-    if(t.mode==='30d')return`<button class="tab ${isAct?'act':''}" onclick="setLast30()">${t.label}</button>`;
-    return`<button class="tab ${isAct?'act':''}" onclick="pickMonth('${t.month}')">${t.label}</button>`;
-  }).join('');
-  if(filterMode==='custom')$('mT').innerHTML+=`<button class="tab act">${filterFrom} → ${filterTo}</button>`;
+  let html=`<button class="tab ${filterMode==='30d'?'act':''}" onclick="setLast30()">30 dias</button>`;
+  if(filterMode==='month'){
+    html+=`<button class="tab act">${filterMonth}</button>`;
+  }
+  if(filterMode==='custom'){
+    html+=`<button class="tab act">${filterFrom.slice(5)} → ${filterTo.slice(5)}</button>`;
+  }
+  $('mT').innerHTML=html;
 }
 
 function renderFiltered(){
