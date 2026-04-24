@@ -178,7 +178,7 @@ tbody td{padding:12px 14px;border-bottom:1px solid rgba(30,40,54,.5);font-size:1
 </div></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script>
-const SHEET_ID = '1WSbWw15PsFl1Hn7XDGVMTECPam7XjY53ZHAA4kE5IdA';
+const SHEET_ID = '1hmidQYlU2-JUhm40zePbF3tKQQDU30u9nD54sigvjFE';
 const COUNTRIES={US:{flag:'🇺🇸',label:'United States',color:'#4A90D9',cur:'USD'},UK:{flag:'🇬🇧',label:'United Kingdom',color:'#A60F3D',cur:'GBP'},IND:{flag:'🇮🇩',label:'Indonesia',color:'#00D971',cur:'IDR'},PHI:{flag:'🇵🇭',label:'Philippines',color:'#FFB800',cur:'PHP'}};
 function sheetURL(t){return`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(t)}`}
 function parseCSV(csv){const lines=csv.split('\n').filter(l=>l.trim());if(lines.length<2)return[];const hdr=lines[0].split(',').map(h=>h.replace(/"/g,'').trim().toLowerCase());return lines.slice(1).map(line=>{const vals=[];let cur='',inQ=false;for(const c of line){if(c==='"'){inQ=!inQ}else if(c===','&&!inQ){vals.push(cur.trim());cur=''}else{cur+=c}}vals.push(cur.trim());const obj={};hdr.forEach((h,i)=>{obj[h]=vals[i]||''});return obj})}
