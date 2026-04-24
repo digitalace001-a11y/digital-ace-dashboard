@@ -196,6 +196,29 @@ let ch={},allRevenue=[],contaInfo={},metas={b:7500,s:10000,g:15000,d:25000};
 let filterMode='30d',filterFrom='',filterTo='',filterMonth='';
 let availableMonths=[];
 
+// Normalize date: handles DD/MM/YYYY, YYYY-MM-DD, or any format
+function normDate(d){
+  if(!d)return'';
+  d=d.replace(/"/g,'').trim();
+  // DD/MM/YYYY → YYYY-MM-DD
+  if(d.match(/^\d{1,2}\/\d{1,2}\/\d{4}$/)){
+    const p=d.split('/');return`${p[2]}-${p[1].padStart(2,'0')}-${p[0].padStart(2,'0')}`;
+  }
+  // Already YYYY-MM-DD
+  if(d.match(/^\d{4}-\d{2}-\d{2}$/))return d;
+  return d;
+}
+// Normalize month: "mar. 2026" → "mar 2026", "Mar 2025" → "mar 2025"  
+function normMes(m){
+  if(!m)return'';
+  return m.replace(/\./g,'').trim().toLowerCase();
+}
+// Get flexible column value - tries multiple possible names
+function getCol(row,names){
+  for(const n of names){if(row[n]!==undefined&&row[n]!=='')return row[n];}
+  return'';
+}
+
 function dotCls(s){if(!s)return['dot-g','Ativo'];const l=s.toLowerCase();if(l.includes('restricao'))return['dot-y','Restricao'];if(l==='fechada')return['dot-r','Fechada'];if(l==='growth')return['dot-a','Growth'];if(l.includes('stand'))return['dot-x','Stand-By'];if(l==='live')return['dot-c','Live'];return['dot-g','Ativo']}
 function tagHtml(t){if(!t)return'';const l=t.toLowerCase();if(l==='shop')return'<span class="tag tag-shop">Shop</span>';if(l==='pilot')return'<span class="tag tag-pilot">Pilot</span>';return'<span class="tag tag-farm">'+t+'</span>'}
 
@@ -217,21 +240,36 @@ function setLast30(){filterMode='30d';filterMonth='';filterFrom='';filterTo='';r
 async function loadAll(){
 try{
 const [revCSV,contCSV,cfgCSV]=await Promise.all([fetch(sheetURL('revenue')).then(r=>r.text()),fetch(sheetURL('contas')).then(r=>r.text()),fetch(sheetURL('config')).then(r=>r.text())]);
-allRevenue=parseCSV(revCSV);
+const rawRev=parseCSV(revCSV);
+// Normalize all revenue rows
+allRevenue=rawRev.map(r=>{
+  const data=normDate(getCol(r,['data','date']));
+  const mes=normMes(getCol(r,['mes','month']));
+  const conta=getCol(r,['conta','account','conta ']);
+  const produto=getCol(r,['produto','product']);
+  const itens=getCol(r,['itens','items','qtd','quantidade']);
+  const gmv=getCol(r,['gmv','gross','valor_total']);
+  const comissao=getCol(r,['comissao','commission','comissão']);
+  const cotacao=getCol(r,['cotacao','cotação','rate','cotacac','cotacao_brl']);
+  const comBrl=getCol(r,['comissao_brl','omissao_b','comissao_brl','com_brl']);
+  const pctCom=getCol(r,['pct_comissao','ct_comissa','pct_com','%_comissao']);
+  return{data,mes,conta,produto,itens,gmv,comissao,cotacao,comissao_brl:comBrl,pct_comissao:pctCom};
+});
+console.log('Revenue rows loaded:',allRevenue.length,'Sample:',allRevenue[0]);
 const cont=parseCSV(contCSV),cfg=parseCSV(cfgCSV);
 cfg.forEach(c=>{const v=parseFloat(c.valor);if(c.chave==='meta_bronze')metas.b=v;if(c.chave==='meta_silver')metas.s=v;if(c.chave==='meta_gold')metas.g=v;if(c.chave==='meta_diamond')metas.d=v});
-contaInfo={};cont.forEach(c=>{if(c.conta)contaInfo[c.conta]={status:c.status||'Ativo',pais:c.pais||'US',tipo:(c.tipo||'Shop').trim()}});
-$('nc').textContent=cont.filter(c=>c.conta).length;
-// Extract available months
-const monthSet=new Set();allRevenue.forEach(r=>{if(r.mes)monthSet.add(r.mes.split(' ')[0])});
-availableMonths=Array.from(monthSet);
+contaInfo={};cont.forEach(c=>{const nome=getCol(c,['conta','account']);if(nome)contaInfo[nome]={status:getCol(c,['status'])||'Ativo',pais:getCol(c,['pais','country'])||'US',tipo:(getCol(c,['tipo','type'])||'Shop').trim()}});
+$('nc').textContent=Object.keys(contaInfo).length;
+// Extract available months (already normalized)
+const monthSet=new Set();allRevenue.forEach(r=>{if(r.mes)monthSet.add(r.mes)});
+availableMonths=Array.from(monthSet).sort();
 $('ldState').style.display='none';$('dc').style.display='block';
 $('upd').textContent='Atualizado '+new Date().toLocaleTimeString('pt-BR');
 filterMode='30d';rTabs();renderFiltered();
 }catch(err){console.error(err);$('ldState').innerHTML='<div style="text-align:center"><p style="color:var(--red);margin-bottom:8px">Erro ao carregar Google Sheets</p><p style="font-size:12px;color:var(--n500)">Verifique SHEET_ID e compartilhamento</p></div>'}}
 
 function filterRevenue(){
-  const today=new Date();
+  const today=new Date();const todayStr=today.toISOString().slice(0,10);
   return allRevenue.filter(r=>{
     if(!r.data||!r.conta)return false;
     const info=contaInfo[r.conta]||{tipo:'Shop'};
@@ -240,7 +278,7 @@ function filterRevenue(){
       const d=new Date(r.data);const diff=(today-d)/(1000*60*60*24);return diff<=30&&diff>=0;
     }
     if(filterMode==='month'){
-      return(r.mes||'').startsWith(filterMonth);
+      return r.mes===filterMonth;
     }
     if(filterMode==='custom'){
       return r.data>=filterFrom&&r.data<=filterTo;
@@ -262,12 +300,13 @@ function rTabs(){
 
 function renderFiltered(){
 const rev=filterRevenue();
-// Build aggregated data
+console.log('Filtered rows:',rev.length);
 const d={a:new Set(),s:{},m:{...metas},days:{},prods:{},byCountry:{},byType:{},totGMV:0,totCom:0,totItens:0,totComBRL:0,cotacoes:{}};
 rev.forEach(r=>{
-  const conta=r.conta||'',info=contaInfo[conta]||{status:'Ativo',pais:'US',tipo:'Shop'};
+  const conta=r.conta,info=contaInfo[conta]||{status:'Ativo',pais:'US',tipo:'Shop'};
   const gmv=parseFloat(r.gmv)||0,com=parseFloat(r.comissao)||0,itens=parseInt(r.itens)||0;
-  const cotacao=parseFloat(r.cotacao)||1;const comBRL=parseFloat(r.comissao_brl)||(com*cotacao);
+  const cotacao=parseFloat(r.cotacao)||1;
+  const comBRL=parseFloat(r.comissao_brl)||(com*cotacao);
   d.a.add(conta);d.s[conta]=info.status;
   d.totGMV+=gmv;d.totCom+=com;d.totItens+=itens;d.totComBRL+=comBRL;
   const pais=info.pais||'US';d.byCountry[pais]=(d.byCountry[pais]||0)+com;d.cotacoes[pais]=cotacao;
